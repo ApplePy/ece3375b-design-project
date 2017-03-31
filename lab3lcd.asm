@@ -11,6 +11,7 @@ TCTL1 	EQU $48
 TSCNT	EQU $44
 TIOS 	EQU $40
 TFLG1 	EQU $4E
+TC4		EQU	$58
 
 ; This initialization routine assumes the existence
 ; of Delay1MS and Delay routines as developed in Lab 2.
@@ -21,7 +22,7 @@ TFLG1 	EQU $4E
 
 
 		ORG $400
-		LDS $4000
+		LDS #$4000
 		JSR InitLCD
 		
 		;Init timer
@@ -43,6 +44,8 @@ TFLG1 	EQU $4E
 		STAA MINUTE
 		STAA HOUR
 		
+		PSHA
+		PSHA
 		JSR WriteTime
 		
 TOP		ldd TSCNT
@@ -55,62 +58,106 @@ TOP		ldd TSCNT
 		INX
 		STX COUNTER
 		
-		CPX #!6000	;has one minute passed?
-		BNE TOP
+		CPX #!600	;has one minute passed?
+		BLO TOP
+		
+		LDD #$0
+		STD COUNTER
 		
 		INC MINUTE
 		LDAA MINUTE
 		CMPA #!60
-		BNE END
+		BLO END
 		
-		CLRA
+		LDAA #$0
 		STAA MINUTE
 		INC HOUR
+		LDAA HOUR
 		CMPA #!24
-		BNE END
+		BLO END
 		
-		CLRA
+		LDAA #$0
 		STAA HOUR
 		
 END		
+	DES
+	DES
+	JSR AddTime
 	
 	JSR WriteTime
 
 		BRA TOP
+
+AddTime:
+		LDD TSCNT
+		LDX #!10
+		IDIV
+		
+		PSHD
+		PULY	;Transfer content of D to Y
+		
+		LDAB MINUTE
+		LDAA HOUR
+		
+LOOP:	CPY #$0
+		BEQ END2
+		DEY
+		INCB
+		CMPB #!60
+		BLO LOOP
+		
+		INCA
+		LDAB #$0
+		CMPA #!24
+		BLO LOOP
+		
+		LDAA #$0
+		BRA LOOP
+		
+END2:	STAB 3,SP
+		STAA 2,SP
+		RTS
+		
 		
 WriteTime:
 		LDAA #$01	;Clear lcd
 		PSHA
-		LDAA #$1
+		LDAA #!1
 		PSHA
 		JSR SendWithDelay
 		PULA
 		PULA
 		
 		CLRA
-		LDAB HOUR
+		LDAB 2,SP
 		LDX #!10	
-		FDIV	;Divide hour by 10; remainder goes to D, quotient goes to X
+		IDIV	;Divide hour by 10; remainder goes to D, quotient goes to X
 		
 		PSHD	;push lower digit
 		PSHX	;push upper digit
 		PULD	;Get upper digit of hour
 		
 		ADDD #$30
+		;LDAB #$31
 		PSHB
 		LDAA #$1
 		PSHA
+		BSET PORTM,$04
 		JSR SendWithDelay
+		BCLR PORTM,$04
 		PULA
 		PULA
 		
 		PULD	;Get lower digit of hour
 		;Write lower digit
 		ADDD #$30
+		;LDAB #$32
 		PSHB
 		LDAA #$1
 		PSHA
+		BSET PORTM,$04
 		JSR SendWithDelay
+		BCLR PORTM,$04
 		PULA
 		PULA
 		
@@ -118,33 +165,41 @@ WriteTime:
 		PSHA
 		LDAA #$1
 		PSHA
+		BSET PORTM,$04
 		JSR SendWithDelay
+		BCLR PORTM,$04
 		PULA
 		PULA
 		
 		CLRA
-		LDAB MINUTE
+		LDAB 3,SP
 		LDX #!10	
-		FDIV	;Divide minute by 10; remainder goes to D, quotient goes to X
+		IDIV	;Divide minute by 10; remainder goes to D, quotient goes to X
 		
 		PSHD	;push lower digit
 		PSHX	;push upper digit
 		PULD	;Get upper digit of minute
 		
 		ADDD #$30	;Write higher digit to lcd
+		;LDAB #$33
 		PSHB
 		LDAA #$1
 		PSHA
+		BSET PORTM,$04
 		JSR SendWithDelay
+		BCLR PORTM,$04
 		PULA
 		PULA
 		
 		PULD	;Get lower digit of minute
 		ADDD #$30	;Write lower digit to lcd
+		;LDAB #$34
 		PSHB
 		LDAA #$1
 		PSHA
+		BSET PORTM,$04
 		JSR SendWithDelay
+		BCLR PORTM,$04
 		PULA
 		PULA
 		
@@ -195,7 +250,7 @@ InitLCD:	ldaa #$FF ; Set port A to output for now
 		pula
 		pula
 
-		ldaa #$0E
+		ldaa #$0C
 		psha
 		ldaa #1
 		psha
@@ -224,7 +279,7 @@ SendWithDelay:  TSX
 		rts
 
 Delay1MS:	pshx
-			ldx #$2 ;use whatever value leads to 1ms delay
+			ldx #!2000 ;use whatever value leads to 1ms delay
 msLoop:  	dex
 			bne msLoop
 			pulx
@@ -236,7 +291,8 @@ delayLoop:	jsr Delay1MS
 			dex
 			bne delayLoop
 			rts		; Implement a variable delay using a stack parameter
-		
+			
+			ORG $1000	
 COUNTER	DS 2
 MINUTE DS 1
 HOUR DS 1
