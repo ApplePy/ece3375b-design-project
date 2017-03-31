@@ -20,6 +20,7 @@ TC4	EQU $58
 COUNTER	DS 2
 MINUTE	DS 1
 HOUR	DS 1
+PREVBUT DS 1
 
 ; This initialization routine assumes the existence
 ; of Delay1MS and Delay routines as developed in Lab 2.
@@ -52,6 +53,7 @@ HOUR	DS 1
 		STD COUNTER
 		STAA MINUTE
 		STAA HOUR
+		STAA PREVBUT
 		
 		PSHA
 		PSHA
@@ -67,19 +69,16 @@ HOUR	DS 1
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-TOP:	
-		LDD TSCNT
-		ADDD #!10000				; delays for 10 ms
-		STD TC4
-		BRCLR TFLG1,$10,*			; wait for 10 ms to pass
-		
+TOP:
+		; TODO: Delay issues?
+
 		;Increment counter by 1
 		LDX COUNTER
 		INX
 		STX COUNTER
 		
-		CPX #!600					;has one minute passed?
-		BLO TOP
+		CPX #!600			; Has one minute passed?
+		BLO END
 		
 		LDD #$0
 		STD COUNTER
@@ -100,13 +99,15 @@ TOP:
 		STAA HOUR
 
 END:	
-		DES
-		DES
-		JSR AddTime					; FIXME: this is wrong
+		; Only display on button press
+		DES					; Save space for return value
+		JSR ShouldDisplay	; Check if a button has been pressed
+		PULB				; Bring result into accumulator B (zero = "no display", non-zero = "yes display")
+
 		JSR WriteTime
 		BRA TOP
 
-AddTime:
+RandomTime:
 		LDD TSCNT
 		LDX #!10
 		IDIV
@@ -150,12 +151,6 @@ WriteTime:
 		JSR SendWithDelay
 		PULA
 		PULA
-
-		; Only display on button press
-		DES					; Save space for return value
-		JSR ShouldDisplay	; Check if a button has been pressed
-		PULA				; Bring result into accumulator A (zero = "no display", non-zero = "yes display")
-		BEQ ExitSubroutine	; Exit if "no"
 
 		CLRA
 		LDAB 2,SP
@@ -370,6 +365,13 @@ pChkLoop_internal:
 		BRSET PORTB,$04,Depress_internal	; A button was pressed
 		BRSET PORTB,$08,Depress_internal	; A button was pressed
 NoPress_internal:
+		; At request of Tom.
+		LDAA #!10							; Yes, switch press detected, now debounce
+		LDAB #!0
+		PSHD
+		BSR Delay							; 10mS delay for debounce FIXME: Use microprocessor timer unit
+		PULD
+
 		; Set return value to zero
 		CLRA
 		BRA SaveReturn_internal
