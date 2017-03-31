@@ -1,16 +1,24 @@
 
-PORTA		EQU $0
-DDRA		EQU $2
-PORTM		EQU $250
-DDRM		EQU $252
+PORTA	EQU $0
+PORTB   EQU $1
+DDRA	EQU $2
+DDRB	EQU $3
+PUCR    EQU $C
+PORTM	EQU $250
+DDRM	EQU $252
 
-;Timer stuff
+; Timer stuff
 TSCR1 	EQU $46
 TSCR2 	EQU $4D
 TCTL1 	EQU $48
 TSCNT	EQU $44
 TIOS 	EQU $40
 TFLG1 	EQU $4E
+
+; Global variables
+COUNTER	DS 2
+MINUTE 	DS 1
+HOUR 	DS 1
 
 ; This initialization routine assumes the existence
 ; of Delay1MS and Delay routines as developed in Lab 2.
@@ -20,223 +28,343 @@ TFLG1 	EQU $4E
 ; supply has a chance to settle.
 
 
-		ORG $400
-		LDS $4000
-		JSR InitLCD
-		
-		;Init timer
-		ldaa #$90
-		staa TSCR1		;Enable timer
-		
-		ldaa #$03
-		staa TSCR2		;Set frequency to 1MHz
-		
-		ldaa #$10
-		staa TIOS		;Set pin 4 to output compare
-		
-		ldaa #$01
-		staa TCTL1		 ;Set pin 4 to toggle
-		
-		
-		LDD #$0
-		STD COUNTER
-		STAA MINUTE
-		STAA HOUR
-		
-		JSR WriteTime
-		
-TOP		ldd TSCNT
-		addd #!10000	;delays for 10 ms
-		std TC4
-		brclr TFLG1,$10,*	;wait for 10 ms to pass
-		
-		;Increment counter by 1
-		LDX COUNTER
-		INX
-		STX COUNTER
-		
-		CPX #!6000	;has one minute passed?
-		BNE TOP
-		
-		INC MINUTE
-		LDAA MINUTE
-		CMPA #!60
-		BNE END
-		
-		CLRA
-		STAA MINUTE
-		INC HOUR
-		CMPA #!24
-		BNE END
-		
-		CLRA
-		STAA HOUR
-		
-END		
-	
-	JSR WriteTime
+    ORG $400
+    LDS $4000
+    JSR InitLCD		; Start LCD
+    JSR InitButtons ; Start buttons
+    
+    ; Init timer
+    LDAA #$90
+    STAA TSCR1		; Enable timer
+    
+    LDAA #$03
+    STAA TSCR2		; Set frequency to 1MHz
+    
+    LDAA #$10
+    STAA TIOS		; Set pin 4 to output compare
+    
+    LDAA #$01
+    STAA TCTL1		; Set pin 4 to toggle
+    
+    
+    LDD #$0
+    STD COUNTER		; Darryl Question: It appears that nothing of value has been written to these registers yet, why store them?
+    STAA MINUTE
+    STAA HOUR
+    
+    JSR WriteTime	; Display the current time to screen
 
-		BRA TOP
-		
+
+
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;                          ;;
+;;      SUBROUTINES         ;;
+;;                          ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+TOP:	
+    LDD TSCNT
+    ADDD #!10000				; delays for 10 ms
+    STD TC4
+    BRCLR TFLG1,$10,*		    ; wait for 10 ms to pass
+    
+    ; Increment counter by 1
+    INC COUNTER
+    
+    ; Check for one minute
+    LDX COUNTER
+    CPX #!6000	; has one minute passed?
+    BNE TOP
+    
+    INC MINUTE
+    LDAA MINUTE
+    CMPA #!60
+    BNE END
+    
+    CLRA
+    STAA MINUTE
+    INC HOUR
+    CMPA #!24
+    BNE END
+    
+    CLRA
+    STAA HOUR
+        
+END:	 
+    JSR WriteTime
+    BRA TOP
+
+ExitSubroutine:
+    RTS
+
 WriteTime:
-		LDAA #$01	;Clear lcd
-		PSHA
-		LDAA #$1
-		PSHA
-		JSR SendWithDelay
-		PULA
-		PULA
-		
-		CLRA
-		LDAB HOUR
-		LDX #!10	
-		FDIV	;Divide hour by 10; remainder goes to D, quotient goes to X
-		
-		PSHD	;push lower digit
-		PSHX	;push upper digit
-		PULD	;Get upper digit of hour
-		
-		ADDD #$30
-		PSHB
-		LDAA #$1
-		PSHA
-		JSR SendWithDelay
-		PULA
-		PULA
-		
-		PULD	;Get lower digit of hour
-		;Write lower digit
-		ADDD #$30
-		PSHB
-		LDAA #$1
-		PSHA
-		JSR SendWithDelay
-		PULA
-		PULA
-		
-		LDAA #$3A	;write : to lcd
-		PSHA
-		LDAA #$1
-		PSHA
-		JSR SendWithDelay
-		PULA
-		PULA
-		
-		CLRA
-		LDAB MINUTE
-		LDX #!10	
-		FDIV	;Divide minute by 10; remainder goes to D, quotient goes to X
-		
-		PSHD	;push lower digit
-		PSHX	;push upper digit
-		PULD	;Get upper digit of minute
-		
-		ADDD #$30	;Write higher digit to lcd
-		PSHB
-		LDAA #$1
-		PSHA
-		JSR SendWithDelay
-		PULA
-		PULA
-		
-		PULD	;Get lower digit of minute
-		ADDD #$30	;Write lower digit to lcd
-		PSHB
-		LDAA #$1
-		PSHA
-		JSR SendWithDelay
-		PULA
-		PULA
-		
-		RTS
+    ; Clear LCD
+    LDAA #$01	
+    PSHA
+    LDAA #$1
+    PSHA
+    JSR SendWithDelay		            ; Send the clear command
+    PULA
+    PULA
 
-InitLCD:	ldaa #$FF ; Set port A to output for now
-		staa DDRA
+    ; Only display on button press
+    DES									; Save space for return value
+    JSR ShouldDisplay		            ; Check if a button has been pressed
+    PULA								; Bring result into accumulator A (zero = "no display", non-zero = "yes display")
+    BEQ ExitSubroutine	                ; Exit if "no"
 
-                ldaa #$1C ; Set port M bits 4,3,2
-		staa DDRM
+    CLRA
+    LDAB HOUR
+    LDX #!10	
+    FDIV	    ; Divide hour by 10; remainder goes to D, quotient goes to X
+
+    PSHD	    ; push lower digit
+    PSHX	    ; push upper digit
+    PULD	    ; Get upper digit of hour
+
+    ; TODO: This pattern is used everywhere... Could this be made a subroutine?
+    ADDD #$30
+    PSHB
+    LDAA #$1
+    PSHA
+    JSR SendWithDelay
+    PULA
+    PULA
+
+    ; Write lower digit
+    PULD	    ; Get lower digit of hour
+    ADDD #$30
+    PSHB
+    LDAA #$1
+    PSHA
+    JSR SendWithDelay
+    PULA
+    PULA
+
+    ; write : to lcd
+    LDAA #$3A
+    PSHA
+    LDAA #$1
+    PSHA
+    JSR SendWithDelay
+    PULA
+    PULA
+
+    CLRA
+    LDAB MINUTE
+    LDX #!10	
+    FDIV	    ; Divide minute by 10; remainder goes to D, quotient goes to X
+
+    PSHD	    ; push lower digit
+    PSHX	    ; push upper digit
+    PULD	    ; Get upper digit of minute
+
+    ADDD #$30	; Write higher digit to lcd
+    PSHB
+    LDAA #$1
+    PSHA
+    JSR SendWithDelay
+    PULA
+    PULA
+
+    PULD	    ; Get lower digit of minute
+    ADDD #$30	; Write lower digit to lcd
+    PSHB
+    LDAA #$1
+    PSHA
+    JSR SendWithDelay
+    PULA
+    PULA
+
+    RTS
+
+InitLCD:
+    ; Set port A to output for now
+    LDAA #$FF 
+    STAA DDRA
+
+    LDAA #$1C   ; Set port M bits 4,3,2
+    STAA DDRM
 
 
-		LDAA #$30	; We need to send this command a bunch of times
-		psha
-		LDAA #5
-		psha
-		jsr SendWithDelay	;Store 0x30 in PORTA, toggle PORTM[4], delay 5 ms
-		pula
+    LDAA #$30	; We need to send this command a bunch of times
+    PSHA
+    LDAA #5
+    PSHA
+    JSR SendWithDelay	; Store 0x30 in PORTA, toggle PORTM[4], delay 5 ms
+    PULA
 
-		ldaa #1
-		psha
-		jsr SendWithDelay	;Store 0x30 in PORTA, toggle PORTM[4], delay 1 ms
-		jsr SendWithDelay	;same
-		jsr SendWithDelay	;same
-		pula
-		pula
+    LDAA #1
+    PSHA
+    JSR SendWithDelay	; Store 0x30 in PORTA, toggle PORTM[4], delay 1 ms
+    JSR SendWithDelay	; same
+    JSR SendWithDelay	; same
+    PULA
+    PULA
 
-		ldaa #$08
-		psha
-		ldaa #1
-		psha
-		jsr SendWithDelay	;Store 0x08 in PORTA, toggle PORTM[4], delay 1 ms
-		pula
-		pula
+    LDAA #$08
+    PSHA
+    LDAA #1
+    PSHA
+    JSR SendWithDelay	; Store 0x08 in PORTA, toggle PORTM[4], delay 1 ms
+    PULA
+    PULA
 
-		ldaa #1
-		psha
-		psha
-		jsr SendWithDelay	;Store 0x1 in PORTA, toggle PORTM[4], delay 1 ms
-		pula
-		pula
+    LDAA #1
+    PSHA
+    PSHA
+    JSR SendWithDelay	; Store 0x1 in PORTA, toggle PORTM[4], delay 1 ms
+    PULA
+    PULA
 
-		ldaa #6
-		psha
-		ldaa #1
-		psha
-		jsr SendWithDelay	;Store 0x6 in PORTA, toggle PORTM[4], delay 1 ms
-		pula
-		pula
+    LDAA #6
+    PSHA
+    LDAA #1
+    PSHA
+    JSR SendWithDelay	; Store 0x6 in PORTA, toggle PORTM[4], delay 1 ms
+    PULA
+    PULA
 
-		ldaa #$0E
-		psha
-		ldaa #1
-		psha
-		jsr SendWithDelay	;Store 0xE in PORTA, toggle PORTM[4], delay 1 ms
-		pula
-		pula
+    LDAA #$0E
+    PSHA
+    LDAA #1
+    PSHA
+    JSR SendWithDelay	; Store 0xE in PORTA, toggle PORTM[4], delay 1 ms
+    PULA
+    PULA
 
-		rts
+    RTS
 
-SendWithDelay:  TSX
-		LDAA 3,x
-		STAA PORTA
+SendWithDelay:
+    TSX
+    LDAA 3,x
+    STAA PORTA
 
-		bset PORTM,$10	 ; Turn on bit 4
-		jsr Delay1MS
-		bclr PORTM,$10	 ; Turn off bit 4
+    BSET PORTM,$10	 ; Turn on bit 4
+    JSR Delay1MS
+    BCLR PORTM,$10	 ; Turn off bit 4
 
-		tsx
-		ldaa 2,x
-		psha
-		clra
-		psha
-		jsr Delay
-		pula
-		pula
-		rts
+    TSX
+    LDAA 2,x
+    PSHA
+    CLRA
+    PSHA
+    JSR Delay
+    PULA
+    PULA
+    RTS
 
-Delay1MS:	pshx
-			ldx #$2 ;use whatever value leads to 1ms delay
-msLoop:  	dex
-			bne msLoop
-			pulx
-			rts		; Use your Delay1MS routine from part 1
-				
-Delay:		tsx
-			ldx 2,x
-delayLoop:	jsr Delay1MS
-			dex
-			bne delayLoop
-			rts		; Implement a variable delay using a stack parameter
-		
-COUNTER	DS 2
-MINUTE DS 1
-HOUR DS 1
+Delay1MS:
+    PSHX
+    LDX #$2     ; use whatever value leads to 1ms delay
+msLoop:
+    DEX
+    BNE msLoop
+    PULX
+    RTS		    ; Use your Delay1MS routine from part 1
+                
+Delay:
+    TSX
+    LDX 2,x
+delayLoop:
+    JSR Delay1MS
+    DEX
+    BNE delayLoop
+    RTS		    ; Implement a variable delay using a stack parameter
+
+
+
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;                          ;;
+;;      DARRYL SUBS         ;;
+;;                          ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; General Structure:
+;;
+;; Don't call *blah*_internal: they just help out
+;; Processor register state is saved (not CCR though)
+;; 
+;; General internal conventions:
+;; Return location address is stored in X.
+;; Value to save to *X is usually stored in B.
+
+InitButtons:
+    BSET DDRB,#$00  ; Set port B to inputs
+    BSET PUCR,#$02  ; Enable pullup devices for all port B inputs
+    RTS
+
+ButtonRowPressCheck_internal:   ; FIXME: Change to interrupt-driven, or at least event-driven
+    ; Be a nice guy, save the processor registers before working
+    PSHD
+    PSHX
+    PSHY
+
+    LDX -7,SP                           ; Store the return address location in X
+
+    ; Listen to button row
+    LDAA 3,X                            ; Get row number
+    EORA #$FF                           ; Convert A into mask
+    STAA PORTB                          ; Set button listening to that row
+
+
+    ; Listen to individual buttons
+    STAB #$08                           ; Listen to first button (minus a spot for the internal loop's arithmetic)
+pChkLoop_internal:
+    LSLB                                ; Move to next button
+    BEQ NoPress_internal                ; Ran out of buttons to check, exit
+    BRCLR PORTA,B,Depress_internal      ; A button was pressed
+    BRA pChkLoop_internal
+NoPress_internal:
+    ; Set return value to zero
+    CLRA
+    BRA SaveReturn_internal
+
+Depress_internal:
+    LDAA #!10                           ; Yes, switch press detected, now debounce
+    BSR Delay                           ; 10mS delay for debounce FIXME: Use microprocessor timer unit
+    BRSET PORTB,B,pChkLoop_internal     ; If switch press not detected after debounce, return to check loop
+Unpress_internal:
+    BRCLR PORTB,B,*                     ; Wait here until switch release detected
+    LDAA #!10                           ; 10mS delay for release of switch press
+    BSR Delay                           ; FIXME: Use microprocessor timer unit
+    BRCLR PORTB,B,Unpress_internal      ; If false release, wait for release
+    
+    ; Done, store return value
+    LDAA #!1
+    BRA SaveReturn_internal
+
+
+ShouldDisplay:
+    ; Be a nice guy, save the processor registers before working
+    PSHD
+    PSHX
+    PSHY
+
+    LDX -7,SP                           ; Store the return address location in X
+
+    ; Scan through buttons
+    LDAA #01                            ; Start at first button
+DisLoop_internal:
+    DES                                 ; Leave space for the return value
+    JSR ButtonRowPressCheck_internal    ; Check row for button press
+    PULB                                ; Get result from stack
+    CMPB #$1                            ; Compare B to see if true
+    BEQ SaveReturn_internal             ; If true, save and RTS
+    LSLA                                ; Shift to next row
+    CMPA #8                             ; Check if there's no more rows to Check
+    BGT DisLoop_internal                ; More rows to Check
+    CLRB                                ; No more rows, return 0
+    BRA SaveReturn_internal
+
+SaveReturn_internal:
+    STAB 0,X                            ; Save value to save location
+    BRA NiceGuyRTS_internal             ; Return
+
+NiceGuyRTS_internal:
+    ; Restore registers and exit subroutine
+    PULY
+    PULX
+    PULD
+    RTS
