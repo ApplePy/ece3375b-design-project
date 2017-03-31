@@ -21,6 +21,7 @@ COUNTER	DS 2
 MINUTE	DS 1
 HOUR	DS 1
 PREVBUT DS 1
+RNDOFFSET DS 1
 
 ; This initialization routine assumes the existence
 ; of Delay1MS and Delay routines as developed in Lab 2.
@@ -54,10 +55,8 @@ PREVBUT DS 1
 		STAA MINUTE
 		STAA HOUR
 		STAA PREVBUT
+		STAA RNDOFFSET
 		
-		PSHA
-		PSHA
-		JSR WriteTime	; Display the current time to screen
 		BRA TOP			; Start the loop
 
 
@@ -70,7 +69,6 @@ PREVBUT DS 1
 
 
 TOP:
-		; TODO: Delay issues?
 
 		;Increment counter by 1
 		LDX COUNTER
@@ -80,22 +78,22 @@ TOP:
 		CPX #!600			; Has one minute passed?
 		BLO END
 		
-		LDD #$0
+		LDD #$0				;reset counter to 0
 		STD COUNTER
 		
-		INC MINUTE
-		LDAA MINUTE
+		INC MINUTE			;increment minute
+		LDAA MINUTE			;compare minute to 60 (ie 1 hour)
 		CMPA #!60
 		BLO END
 		
-		LDAA #$0
+		LDAA #$0			;reset minute and increment hour
 		STAA MINUTE
 		INC HOUR
 		LDAA HOUR
-		CMPA #!24
+		CMPA #!24			;check if hour is back to midnight
 		BLO END
 		
-		LDAA #$0
+		LDAA #$0			;reset hour to 0
 		STAA HOUR
 
 END:	
@@ -104,22 +102,58 @@ END:
 		JSR ShouldDisplay	; Check if a button has been pressed
 		PULB				; Bring result into accumulator B (zero = "no display", non-zero = "yes display")
 
-		JSR WriteTime
+		CMPB #0			;if button is 0 then turn off the screen
+		BEQ OFFSCREEN
+
+		LDAA PREVBUT
+		CBA
+		JSR ONSCREEN		;if button is just now being pressed then determine new random offset and turn on screen
+
+		DES
+		DES
+		JSR RandomTime		;load current time + offset into stack
+		JSR WriteTime		;display time+offset to lcd
+		BRA TOP			;restart loop
+
+OFFSCREEN:	
+		LDAA #$08	;Turn off the screen
+		PSHA
+		LDAA #1
+		PSHA
+		JSR SendWithDelay
+		PULA
+		PULA
+
+		LDAA #0		;reset values
+		STAA PREVBUT
+		STAA RNDOFFSET
 		BRA TOP
 
-RandomTime:
-		LDD TSCNT
+ONSCREEN:
+
+		LDAA #$0E		;turn on the screen
+		PSHA
+		LDAA #1
+		PSHA
+		JSR SendWithDelay	
+		PULA
+		PULA
+
+		LDD TSCNT	;generate random value
 		LDX #!10
 		IDIV
+		STAB RNDOFFSET	;stores random value in random offset
+		RTS
+
+RandomTime:
 		
-		PSHD
-		PULY						; Transfer content of D to Y
+		LDY RNDOFFSET		; get the current offset
 		
 		LDAB MINUTE
 		LDAA HOUR
 
 LOOP:
-		CPY #$0
+		CPY #$0			;until Y = 0 increment B (minute)
 		BEQ END2
 		DEY
 		INCB
@@ -135,7 +169,7 @@ LOOP:
 		BRA LOOP
 
 END2:
-		STAB 3,SP
+		STAB 3,SP		;store time+offset in stack
 		STAA 2,SP
 		RTS
 
@@ -153,7 +187,7 @@ WriteTime:
 		PULA
 
 		CLRA
-		LDAB 2,SP
+		LDAB 2,SP			;get the hour from stack
 		LDX #!10	
 		IDIV				;Divide hour by 10; remainder goes to D, quotient goes to X
 		
@@ -194,7 +228,7 @@ WriteTime:
 		PULA
 	
 		CLRA
-		LDAB 3,SP
+		LDAB 3,SP			;get current minute + offset from stack
 		LDX #!10	
 		IDIV				; Divide minute by 10; remainder goes to D, quotient goes to X
 		
