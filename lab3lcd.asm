@@ -14,7 +14,9 @@ TCTL1 	EQU $48
 TSCNT	EQU $44
 TIOS 	EQU $40
 TFLG1 	EQU $4E
+TC4     EQU $58
 
+        ORG $1000
 ; Global variables
 COUNTER	DS 2
 MINUTE 	DS 1
@@ -29,7 +31,7 @@ HOUR 	DS 1
 
 
     ORG $400
-    LDS $4000
+    LDS #$4000
     JSR InitLCD		; Start LCD
     JSR InitButtons ; Start buttons
     
@@ -53,6 +55,7 @@ HOUR 	DS 1
     STAA HOUR
     
     JSR WriteTime	; Display the current time to screen
+    BRA TOP			; Start the loop
 
 
 
@@ -123,7 +126,6 @@ WriteTime:
     PSHX	    ; push upper digit
     PULD	    ; Get upper digit of hour
 
-    ; TODO: This pattern is used everywhere... Could this be made a subroutine?
     ADDD #$30
     PSHB
     LDAA #$1
@@ -265,12 +267,14 @@ msLoop:
     RTS		    ; Use your Delay1MS routine from part 1
                 
 Delay:
+    PSHX
     TSX
     LDX 2,x
 delayLoop:
     JSR Delay1MS
     DEX
     BNE delayLoop
+    PULX
     RTS		    ; Implement a variable delay using a stack parameter
 
 
@@ -291,8 +295,12 @@ delayLoop:
 ;; Value to save to *X is usually stored in B.
 
 InitButtons:
-    BSET DDRB,#$00  ; Set port B to inputs
-    BSET PUCR,#$02  ; Enable pullup devices for all port B inputs
+    BSET DDRB,$F0   ; Set port B to input/output (automatically pull-down)
+    ; Set up PortB
+    PSHA
+    LDAA #$0
+    STAA PORTB
+    PULA
     RTS
 
 ButtonRowPressCheck_internal:   ; FIXME: Change to interrupt-driven, or at least event-driven
@@ -301,21 +309,17 @@ ButtonRowPressCheck_internal:   ; FIXME: Change to interrupt-driven, or at least
     PSHX
     PSHY
 
-    LDX -7,SP                           ; Store the return address location in X
+    LEAX 8,SP                           ; Store the return address location in X
 
-    ; Listen to button row
-    LDAA 3,X                            ; Get row number
-    EORA #$FF                           ; Convert A into mask
+    ; Listen to button row (its stored on A already)
     STAA PORTB                          ; Set button listening to that row
+    JSR Delay1MS						; Give PORTB time to settle
 
-
-    ; Listen to individual buttons
-    STAB #$08                           ; Listen to first button (minus a spot for the internal loop's arithmetic)
 pChkLoop_internal:
-    LSLB                                ; Move to next button
-    BEQ NoPress_internal                ; Ran out of buttons to check, exit
-    BRCLR PORTA,B,Depress_internal      ; A button was pressed
-    BRA pChkLoop_internal
+    BRSET PORTB,$01,Depress_internal    ; A button was pressed
+    BRSET PORTB,$02,Depress_internal    ; A button was pressed
+    BRSET PORTB,$04,Depress_internal    ; A button was pressed
+    BRSET PORTB,$08,Depress_internal    ; A button was pressed
 NoPress_internal:
     ; Set return value to zero
     CLRA
@@ -323,16 +327,32 @@ NoPress_internal:
 
 Depress_internal:
     LDAA #!10                           ; Yes, switch press detected, now debounce
+    LDAB #!0
+    PSHD
     BSR Delay                           ; 10mS delay for debounce FIXME: Use microprocessor timer unit
-    BRSET PORTB,B,pChkLoop_internal     ; If switch press not detected after debounce, return to check loop
+    PULD
+    BRSET PORTB,$01,Unpress_internal 	; A button was pressed
+    BRSET PORTB,$02,Unpress_internal 	; A button was pressed
+    BRSET PORTB,$04,Unpress_internal 	; A button was pressed
+    BRSET PORTB,$08,Unpress_internal 	; A button was pressed
+    BRA pChkLoop_internal ; If switch press not detected after debounce, return to check loop
 Unpress_internal:
-    BRCLR PORTB,B,*                     ; Wait here until switch release detected
+    BRSET PORTB,$01,* 	                ; A button was pressed
+    BRSET PORTB,$02,* 	                ; A button was pressed
+    BRSET PORTB,$04,* 	                ; A button was pressed
+    BRSET PORTB,$08,* 	                ; A button was pressed
     LDAA #!10                           ; 10mS delay for release of switch press
+    LDAB #!0
+    PSHD
     BSR Delay                           ; FIXME: Use microprocessor timer unit
-    BRCLR PORTB,B,Unpress_internal      ; If false release, wait for release
+    PULD
+    BRSET PORTB,$01,Unpress_internal 	; A button was pressed
+    BRSET PORTB,$02,Unpress_internal 	; A button was pressed
+    BRSET PORTB,$04,Unpress_internal 	; A button was pressed
+    BRSET PORTB,$08,Unpress_internal 	; A button was pressed
     
     ; Done, store return value
-    LDAA #!1
+    LDAB #!1
     BRA SaveReturn_internal
 
 
@@ -342,10 +362,10 @@ ShouldDisplay:
     PSHX
     PSHY
 
-    LDX -7,SP                           ; Store the return address location in X
+    LEAX 8,SP                           ; Store the return address location in X
 
     ; Scan through buttons
-    LDAA #01                            ; Start at first button
+    LDAA #10                            ; Start at first button
 DisLoop_internal:
     DES                                 ; Leave space for the return value
     JSR ButtonRowPressCheck_internal    ; Check row for button press
@@ -353,8 +373,8 @@ DisLoop_internal:
     CMPB #$1                            ; Compare B to see if true
     BEQ SaveReturn_internal             ; If true, save and RTS
     LSLA                                ; Shift to next row
-    CMPA #8                             ; Check if there's no more rows to Check
-    BGT DisLoop_internal                ; More rows to Check
+    CMPA #10                            ; Check if there's no more rows to Check
+    BGE DisLoop_internal                ; More rows to Check
     CLRB                                ; No more rows, return 0
     BRA SaveReturn_internal
 
