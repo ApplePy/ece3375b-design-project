@@ -107,12 +107,18 @@ END:
 
 		LDAA PREVBUT
 		CBA
+		BEQ SKIPRAND		;if button was previously pressed, skip turning on screen and generating offset
 		JSR ONSCREEN		;if button is just now being pressed then determine new random offset and turn on screen
+		LDAA #$1		;store current button state as previous button state for next loop
+		STAA PREVBUTT
 
-		DES
+SKIPRAND:	DES
 		DES
 		JSR RandomTime		;load current time + offset into stack
 		JSR WriteTime		;display time+offset to lcd
+		INS			;clean up stack
+		INS
+		
 		BRA TOP			;restart loop
 
 OFFSCREEN:	
